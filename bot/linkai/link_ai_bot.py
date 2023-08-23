@@ -22,9 +22,9 @@ class LinkAIBot(Bot, OpenAIImage):
 
     def __init__(self):
         super().__init__()
-        self.base_url = "https://api.link-ai.chat/v1"
+        self.base_url = "https://api.dify.ai/v1"
         self.sessions = SessionManager(ChatGPTSession, model=conf().get("model") or "gpt-3.5-turbo")
-
+        self.cacah=dict()
     def reply(self, query, context: Context = None) -> Reply:
         if context.type == ContextType.TEXT:
             return self._chat(query, context)
@@ -60,7 +60,9 @@ class LinkAIBot(Bot, OpenAIImage):
             else:
                 app_code = context.kwargs.get("app_code") or conf().get("linkai_app_code")
             linkai_api_key = conf().get("linkai_api_key")
-
+            msg = context.kwargs['msg']
+            from_user_nickname=msg.from_user_nickname
+            print(from_user_nickname)
             session_id = context["session_id"]
 
             session = self.sessions.session_query(query, session_id)
@@ -69,27 +71,37 @@ class LinkAIBot(Bot, OpenAIImage):
             if session.messages[0].get("role") == "system":
                 if app_code or model == "wenxin":
                     session.messages.pop(0)
+            if session_id in self.cacah.keys():
 
+                conversationId=self.cacah[session_id]
+            else:
+                conversationId = ""
             body = {
                 "app_code": app_code,
-                "messages": session.messages,
-                "model": model,     # 对话模型的名称, 支持 gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-4, wenxin
-                "temperature": conf().get("temperature"),
-                "top_p": conf().get("top_p", 1),
-                "frequency_penalty": conf().get("frequency_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
-                "presence_penalty": conf().get("presence_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
+                "inputs": {},
+                "query": query,
+                "user": from_user_nickname,
+                "conversation_id": conversationId
+                # "messages": session.messages,
+                # "model": model,     # 对话模型的名称, 支持 gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-4, wenxin
+                # "temperature": conf().get("temperature"),
+                # "top_p": conf().get("top_p", 1),
+                # "frequency_penalty": conf().get("frequency_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
+                # "presence_penalty": conf().get("presence_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
             }
             logger.info(f"[LINKAI] query={query}, app_code={app_code}, mode={body.get('model')}")
             headers = {"Authorization": "Bearer " + linkai_api_key}
 
             # do http request
-            res = requests.post(url=self.base_url + "/chat/completions", json=body, headers=headers,
+            res = requests.post(url=self.base_url + "/chat-messages", json=body, headers=headers,
                                 timeout=conf().get("request_timeout", 180))
             if res.status_code == 200:
                 # execute success
                 response = res.json()
-                reply_content = response["choices"][0]["message"]["content"]
-                total_tokens = response["usage"]["total_tokens"]
+                logger.info(f"[LINKAI] reply1={response}")
+                self.cacah[session_id] = response['conversation_id']
+                reply_content = response['answer']
+                total_tokens = "null"
                 logger.info(f"[LINKAI] reply={reply_content}, total_tokens={total_tokens}")
                 self.sessions.session_reply(reply_content, session_id, total_tokens)
                 return Reply(ReplyType.TEXT, reply_content)
